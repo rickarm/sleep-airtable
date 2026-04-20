@@ -4,10 +4,8 @@
 import json
 import logging
 import os
-import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 from threading import Timer
 
@@ -15,9 +13,26 @@ from dotenv import load_dotenv
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifiedEvent
 
-# Load .env from the script's directory
+# Load .env from the script's directory before importing the updater, so that
+# AIRTABLE_API_KEY is present when process_file() makes its first API call.
 SCRIPT_DIR = Path(__file__).resolve().parent
 load_dotenv(SCRIPT_DIR / ".env")
+
+# Import process_file directly rather than spawning a subprocess.
+#
+# Previously the watcher called:
+#   subprocess.run([sys.executable, "sleep_airtable_updater.py", "--input", ...])
+#
+# That approach breaks whenever Homebrew upgrades Python: the venv symlinks
+# immediately resolve to the new Cellar binary, which hasn't been granted Full
+# Disk Access in macOS TCC. The long-running watcher process itself keeps its
+# FDA (the binary image stays in memory), but every newly-spawned child process
+# executes the upgraded binary — and gets a PermissionError on the iCloud path.
+#
+# Calling process_file() in-process eliminates the subprocess entirely: only
+# the single watcher process ever needs FDA, and a Homebrew Python upgrade no
+# longer breaks anything until the next time launchd restarts the service.
+from sleep_airtable_updater import process_file  # noqa: E402
 
 api_key = os.getenv("AIRTABLE_API_KEY")
 if not api_key:
@@ -26,7 +41,6 @@ if not api_key:
 WATCH_DIR = Path.home() / "Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents/Daily-sleep"
 LOG_PATH = Path.home() / "Library/Logs/sleep_airtable_watcher.log"
 PROCESSED_STATE_PATH = Path.home() / "Library/Logs/sleep_airtable_watcher_state.json"
-UPDATER_SCRIPT = SCRIPT_DIR / "sleep_airtable_updater.py"
 DEBOUNCE_SECONDS = 5
 
 # Set up logging
@@ -113,36 +127,17 @@ class SleepFileHandler(FileSystemEventHandler):
         # Try processing, retry once on failure (handles partial iCloud sync)
         for attempt in range(2):
             try:
-                result = subprocess.run(
-                    [sys.executable, str(UPDATER_SCRIPT), "--input", filepath],
-                    capture_output=True,
-                    text=True,
-                    cwd=str(SCRIPT_DIR),
-                    timeout=120,
-                )
-
-                if result.returncode == 0:
-                    output = result.stdout.strip()
-                    # Extract summary from last line
-                    lines = output.split("\n")
-                    summary = lines[-1] if lines else "completed"
-                    logger.info(f"DONE {filename} → {summary}")
-                    self._processed[filepath] = mtime
-                    self._save_state()
-                    return
-                else:
-                    error_msg = result.stderr.strip() or result.stdout.strip()
-                    if attempt == 0:
-                        logger.info(f"RETRY {filename} → {error_msg}")
-                        time.sleep(10)
-                        continue
-                    logger.info(f"ERROR {filename} → {error_msg}")
-                    return
-
-            except subprocess.TimeoutExpired:
-                logger.info(f"ERROR {filename} → timed out after 120s")
+                inserted, skipped, errors = process_file(filepath)
+                summary = f"Done. Processed 1 nights: {inserted} inserted, {skipped} skipped, {errors} errors."
+                logger.info(f"DONE {filename} → {summary}")
+                self._processed[filepath] = mtime
+                self._save_state()
                 return
             except Exception as e:
+                if attempt == 0:
+                    logger.info(f"RETRY {filename} → {e}")
+                    time.sleep(10)
+                    continue
                 logger.info(f"ERROR {filename} → {e}")
                 return
 
