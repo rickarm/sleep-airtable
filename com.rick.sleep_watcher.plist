@@ -7,8 +7,8 @@
     <string>com.rick.sleep_watcher</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/rick/scripts/sleep-airtable/.venv/bin/python3</string>
-        <string>/Users/rick/scripts/sleep-airtable/sleep_watcher.py</string>
+        <string>/Users/rick/Dev/sleep-airtable/.venv/bin/python3</string>
+        <string>/Users/rick/Dev/sleep-airtable/sleep_watcher.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
