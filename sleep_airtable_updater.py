@@ -6,7 +6,7 @@ import fcntl
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 
@@ -148,7 +148,6 @@ def bucket_by_night_and_source(samples):
     buckets = defaultdict(list)
     for s in samples:
         local_start = to_local(s["start"])
-        local_end = to_local(s["end"])
         # Use the start time for bucketing
         night = get_night_date(local_start)
         key = (night, s["source"])
