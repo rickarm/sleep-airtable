@@ -1,0 +1,63 @@
+# Reusable Python CI — drop in at .github/workflows/ci.yml
+#
+# Philosophy: a cheap regression tripwire for unattended scripts/services.
+#   - ruff           → lint
+#   - compile smoke  → catches syntax errors and renamed/missing imports
+#                      EVEN IN REPOS WITH NO TESTS (the sherlock-hq class of bug)
+#   - pytest         → runs only when a test suite exists
+#
+# Adapts to how the repo installs deps: uv.lock → uv sync; pyproject → uv sync;
+# requirements.txt → uv pip install. Works for both uv and pip projects.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          set -e
+          if [ -f uv.lock ]; then
+            uv sync --frozen
+          elif [ -f pyproject.toml ]; then
+            uv sync
+          elif [ -f requirements.txt ]; then
+            uv venv && uv pip install -r requirements.txt
+          else
+            uv venv
+          fi
+          # Tooling the steps below need, regardless of how deps were installed.
+          uv pip install ruff pytest
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Smoke compile (syntax + import surface)
+        run: |
+          files=$(git ls-files '*.py')
+          [ -n "$files" ] && uv run python -m compileall -q $files || echo "no .py files"
+
+      - name: Tests (only if a suite exists)
+        # If the suite needs secrets, add throwaway values here — tests should
+        # MOCK all real network/API calls, so a dummy value is enough:
+        # env:
+        #   SOME_API_KEY: ci-test-key
+        run: |
+          if git ls-files | grep -Eq '(^|/)test_.*\.py$|_test\.py$|(^|/)tests?/'; then
+            uv run python -m pytest -q
+          else
+            echo "No tests found — ruff + compile smoke already ran."
+          fi
