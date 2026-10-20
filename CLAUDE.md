@@ -26,7 +26,24 @@ python sleep_airtable_updater.py --input <file> --start-date 2026-03-01 --end-da
 
 # Start watcher manually
 python sleep_watcher.py
+
+# Oura API sync (issue #6): one-time login, then insert missing nights
+python oura_sync.py auth-url              # open the printed URL, approve
+python oura_sync.py auth-code '<redirected localhost URL>'
+python oura_sync.py sync --dry-run        # last 7 days by default
+python oura_sync.py sync --start-date 2026-06-07 --end-date 2026-07-20
 ```
+
+Oura secrets are in the login keychain, service `oura-api` (accounts `client_id`, `client_secret`, `refresh_token`, `access_token`). Refresh tokens are single use: `save_tokens()` stores the new one before anything else, so never refresh outside that function. Both import paths write Source `Oura`, so the (Night, Source) dedup keeps them from writing a night twice.
+
+## Testing
+
+```bash
+PATH=/opt/homebrew/bin:$PATH uvx --with pytest --with-requirements requirements.txt pytest -q tests   # repo .venv has no pytest
+PATH=/opt/homebrew/bin:$PATH uvx "ruff<0.16" check . && PATH=/opt/homebrew/bin:$PATH uvx "ruff<0.16" format --check .   # CI runs both
+```
+
+- Oura API reference: the v2 docs page needs JavaScript to render, so read the OpenAPI spec instead: `https://cloud.ouraring.com/v2/static/json/openapi-1.42.json`.
 
 ## Architecture
 
